@@ -8,7 +8,7 @@ import os
 import re
 import sys
 
-YEAR = 2024
+YEAR = int(input("Enter survey year: "))
 INPUT_DIR = os.path.join(os.path.dirname(__file__), "inputs")
 SITES_FILE = os.path.join(INPUT_DIR, "SITES.xlsx")
 LOG_FILE = os.path.join(INPUT_DIR, f"{YEAR}_LOGSummary.xlsx")
@@ -35,17 +35,46 @@ print(f"LOGSummary rows: {len(log)}")
 sites["_subsite_key"] = sites["SUBSITE"].astype(str).str.strip().str.upper()
 log["_subsite_key"] = log["SUBSITE"].astype(str).str.strip().str.upper()
 
-# --- 3A. Handle Duplicate Surveys ---
+# --- 3A. Handle Duplicate Surveys (Multiple Passes) ---
 # Remove "DO NOT USE" rows
 log_clean = log[~log["SUBSITE"].astype(str).str.contains("DO NOT USE", case=False, na=False)].copy()
 
-# Flag duplicates and keep most recent
-dup_subsites = log_clean[log_clean.duplicated(subset="_subsite_key", keep=False)]["_subsite_key"].unique()
-needs_review_dupes = set(dup_subsites)
-
-# Keep most recent DATE for each subsite
 log_clean["DATE"] = pd.to_datetime(log_clean["DATE"], errors="coerce")
-log_clean = log_clean.sort_values("DATE", ascending=False).drop_duplicates(subset="_subsite_key", keep="first")
+# Convert TIME to numeric for sorting
+log_clean["_time_num"] = pd.to_numeric(log_clean["TIME"], errors="coerce")
+
+def _concat_non_null(series):
+    """Concatenate non-null values with '; ' separator."""
+    vals = [str(v).strip() for v in series if pd.notna(v) and str(v).strip()]
+    return "; ".join(vals) if vals else ""
+
+def _concat_disturbance(series):
+    """Concatenate disturbance values, removing repeated 'Disturbed' prefix."""
+    vals = [str(v).strip() for v in series if pd.notna(v) and str(v).strip()]
+    if not vals:
+        return ""
+    parts = []
+    for v in vals:
+        # Strip "Disturbed " prefix for all but the first entry
+        if parts and v.lower().startswith("disturbed "):
+            parts.append(v[len("Disturbed "):])
+        else:
+            parts.append(v)
+    return "; ".join(parts)
+
+# For each subsite group: take earliest-TIME row for most fields, aggregate ADD/DISTURBANCE/PASS DESCRIPTION
+aggregated_rows = []
+for key, group in log_clean.groupby("_subsite_key"):
+    # Sort by time to get earliest pass first
+    group_sorted = group.sort_values("_time_num", ascending=True)
+    base = group_sorted.iloc[0].copy()
+    # Aggregate ADD, DISTURBANCE, PASS DESCRIPTION across all passes
+    base["ADD"] = _concat_non_null(group_sorted["ADD"])
+    base["DISTURBANCE"] = _concat_disturbance(group_sorted["DISTURBANCE"])
+    base["PASS DESCRIPTION"] = _concat_non_null(group_sorted["PASS DESCRIPTION"])
+    aggregated_rows.append(base)
+
+log_clean = pd.DataFrame(aggregated_rows)
 
 # Build set of log subsites
 log_subsites = set(log_clean["_subsite_key"])
@@ -84,18 +113,23 @@ for _, site_row in sites.iterrows():
 
     # FLAGS
     flags = ""
-    if key in needs_review_dupes:
-        flags = "NEEDS_REVIEW"
+    flag_reason = ""
     if has_log:
         site_mml = str(site_row.get("MML_ID", "")).strip()
         log_mml = str(log_row.get("MML_ID", "")).strip()
-        # Compare only numeric prefix (e.g., "248A" -> "248")
-        site_mml_num = re.match(r"(\d+)", site_mml)
-        log_mml_num = re.match(r"(\d+)", log_mml)
-        site_mml_num = site_mml_num.group(1) if site_mml_num else site_mml
-        log_mml_num = log_mml_num.group(1) if log_mml_num else log_mml
-        if site_mml_num and log_mml_num and site_mml_num != log_mml_num:
-            flags = "NEEDS_REVIEW"
+        # MML_ID = "NEW" means new site
+        if log_mml.upper() == "NEW":
+            flags = "NEW SITE"
+            flag_reason = "MML_ID marked as NEW"
+        else:
+            # Compare only numeric prefix (e.g., "248A" -> "248")
+            site_mml_num = re.match(r"(\d+)", site_mml)
+            log_mml_num = re.match(r"(\d+)", log_mml)
+            site_mml_num = site_mml_num.group(1) if site_mml_num else site_mml
+            log_mml_num = log_mml_num.group(1) if log_mml_num else log_mml
+            if site_mml_num and log_mml_num and site_mml_num != log_mml_num:
+                flags = "NEEDS_REVIEW"
+                flag_reason = f"MML_ID mismatch: SITES={site_mml}, LOG={log_mml}"
 
     def _val(series_row, col):
         """Get value from row, return blank string if null."""
@@ -106,6 +140,9 @@ for _, site_row in sites.iterrows():
 
     row = {
         "FLAGS": flags,
+        "_flag_reason": flag_reason,
+        "_sites_mml": str(site_row.get("MML_ID", "")).strip(),
+        "_log_mml": str(log_row.get("MML_ID", "")).strip() if has_log else "",
         "SUBSITE": log_row["SUBSITE"] if has_log else site_row["SUBSITE"],
         "SUBSITE_ID": _val(site_row, "SUBSITE_ID"),
         "PARENTSITE": _val(site_row, "PARENTSITE"),
@@ -165,6 +202,9 @@ for key in new_site_keys:
 
     row = {
         "FLAGS": "NEW SITE",
+        "_flag_reason": "SUBSITE not in SITES.xlsx",
+        "_sites_mml": "",
+        "_log_mml": str(_val(log_row, "MML_ID")),
         "SUBSITE": log_row["SUBSITE"],
         "SUBSITE_ID": "",
         "PARENTSITE": "",
@@ -213,6 +253,18 @@ df["_sort_subsite"] = df["SUBSITE"].astype(str).str.upper()
 df = df.sort_values(["_sort_survey", "_sort_date", "_sort_subsite"], na_position="last").drop(columns=["_sort_survey", "_sort_date", "_sort_subsite"])
 
 # --- 6. Output Generation ---
+
+# Generate error report for flagged sites
+flagged = df[df["FLAGS"] != ""].copy()
+if len(flagged) > 0:
+    error_report = flagged[["FLAGS", "SUBSITE", "_sites_mml", "_log_mml", "_flag_reason"]].copy()
+    error_report.columns = ["FLAGS", "SUBSITE", "SITES_MML_ID", "LOG_MML_ID", "REASON"]
+    error_report_file = os.path.join(OUTPUT_DIR, f"FLAGGED_SITES_{YEAR}.csv")
+    error_report.to_csv(error_report_file, index=False)
+    print(f"Error report saved: {error_report_file}")
+
+# Drop internal columns before writing main output
+df = df.drop(columns=["_flag_reason", "_sites_mml", "_log_mml"])
 df.to_excel(OUTPUT_FILE, index=False, engine="openpyxl")
 
 # Apply formatting

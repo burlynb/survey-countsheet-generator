@@ -13,9 +13,9 @@ Generate count sheet templates for sea otter aerial surveys by merging master si
 
 ### 1. Input Validation
 
-**Required files in the working directory:**
-- `SITES.xlsx` - Master list of all possible survey sites (502 sites)
-- `{YEAR}_LOGSummary.xlsx` - Field log for the survey year (e.g., `2024_LOGSummary.xlsx`)
+**The script prompts for the survey year at runtime**, then looks for the corresponding files:
+- `inputs/SITES.xlsx` - Master list of all possible survey sites (502 sites)
+- `inputs/{YEAR}_LOGSummary.xlsx` - Field log for the survey year (e.g., `2024_LOGSummary.xlsx`)
 
 **Pre-flight checks:**
 - Verify both files exist
@@ -37,13 +37,18 @@ Generate count sheet templates for sea otter aerial surveys by merging master si
 
 ### 3. Data Processing Rules
 
-#### **Step 3A: Handle Duplicate Surveys**
+#### **Step 3A: Handle Duplicate Surveys (Multiple Passes)**
 
 ```python
 # Remove rows marked as "DO NOT USE"
 # If same SUBSITE appears multiple times (excluding DO NOT USE):
-#   - Keep the most recent DATE
-#   - Flag as "NEEDS_REVIEW" if multiple valid entries exist
+#   - These are multiple passes of the same site (not errors)
+#   - Use data from the entry with the EARLIEST TIME for most fields
+#   - Concatenate ADD values across all entries (e.g., "Add 1; Add 2")
+#   - Concatenate DISTURBANCE values, removing repeated "Disturbed" prefix
+#     (e.g., "Disturbed 40-50; 25; 9; 5" instead of "Disturbed 40-50; Disturbed 25; Disturbed 9; Disturbed 5")
+#   - Concatenate PASS DESCRIPTION values separated by "; "
+#   - Do NOT flag duplicates as NEEDS_REVIEW
 ```
 
 #### **Step 3B: Determine Survey Status**
@@ -93,14 +98,12 @@ Create FLAGS column (Column A) with quality checks:
 
 ```
 FLAGS = "NEW SITE" IF:
-    - SUBSITE appears in LOGSUMMARY
-    - SUBSITE NOT in SITES.xlsx
-    - SUBSITE does NOT contain "DO NOT USE"
+    - SUBSITE appears in LOGSUMMARY but NOT in SITES.xlsx (and does NOT contain "DO NOT USE")
+    - OR MML_ID in LOGSUMMARY = "NEW" (case-insensitive) for this SUBSITE
     
 FLAGS = "NEEDS_REVIEW" IF:
     - Numeric prefix of MML_ID in LOGSUMMARY ≠ numeric prefix of MML_ID in SITES for same SUBSITE
       (e.g., SITES MML_ID "248" matches LOGSUMMARY MML_ID "248A" — the trailing letter is a waypoint identifier and should be ignored when comparing)
-    - Multiple non-"DO NOT USE" entries for same SUBSITE exist
     - SUBSITE can't be matched between files
     - Other data integrity issues
     
@@ -165,6 +168,11 @@ Build output template with these columns in order:
   - Freeze top row
   - Auto-fit column widths
   - If possible, highlight rows with FLAGS in yellow
+
+**Create error report: `outputs/FLAGGED_SITES_{YEAR}.csv`**
+- Contains only rows with FLAGS set (NEW SITE or NEEDS_REVIEW)
+- Columns: FLAGS, SUBSITE, SITES_MML_ID, LOG_MML_ID, REASON
+- REASON column explains why each site was flagged (e.g., "MML_ID mismatch: SITES=676, LOG=308", "Duplicate entries in LOGSummary", "SUBSITE not in SITES.xlsx", "MML_ID marked as NEW")
 
 **Generate summary report:**
 ```
