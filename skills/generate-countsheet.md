@@ -98,7 +98,8 @@ FLAGS = "NEW SITE" IF:
     - SUBSITE does NOT contain "DO NOT USE"
     
 FLAGS = "NEEDS_REVIEW" IF:
-    - MML_ID in LOGSUMMARY ≠ MML_ID in SITES for same SUBSITE
+    - Numeric prefix of MML_ID in LOGSUMMARY ≠ numeric prefix of MML_ID in SITES for same SUBSITE
+      (e.g., SITES MML_ID "248" matches LOGSUMMARY MML_ID "248A" — the trailing letter is a waypoint identifier and should be ignored when comparing)
     - Multiple non-"DO NOT USE" entries for same SUBSITE exist
     - SUBSITE can't be matched between files
     - Other data integrity issues
@@ -126,7 +127,7 @@ Build output template with these columns in order:
 | LAT | SITES | From master list |
 | LON | SITES | From master list |
 | PRIORITY | LOGSUMMARY | From field log (if exists) |
-| DATE | LOGSUMMARY | Blank if not surveyed |
+| DATE | LOGSUMMARY | Blank if not surveyed. Store as mm/dd/yyyy but display format as m/dd in Excel. |
 | SURVEY | Calculated | "OTTER" / "MISSED" / "OUTSIDE" |
 | COUNTTYPE | Calculated | 3, 4, or blank |
 | TIME | LOGSUMMARY | Copy if not null |
@@ -157,8 +158,8 @@ Build output template with these columns in order:
 
 ### 6. Output Generation
 
-**Create file: `COUNTSHEET_TEMPLATE_{YEAR}.xlsx`**
-- Sort by: REGION, then SUBSITE alphabetically
+**Create file: `outputs/COUNTSHEET_TEMPLATE_{YEAR}.xlsx`**
+- Sort by: SURVEY (OTTER → MISSED → OUTSIDE), then DATE (earliest → latest), then SUBSITE alphabetically (A→Z)
 - Apply formatting:
   - Header row: Bold
   - Freeze top row
