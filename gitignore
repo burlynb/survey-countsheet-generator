@@ -1,0 +1,28 @@
+# Excel files (except templates in outputs/)
+*.xlsx
+!outputs/*.xlsx
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+venv/
+env/
+.venv
+
+# Claude Code
+.claude/
+
+# OS files
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# Logs
+*.log
+
+# Temporary files
+~$*.xlsx
+.~lock.*
