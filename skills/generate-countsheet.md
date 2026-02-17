@@ -43,12 +43,26 @@ Generate count sheet templates for sea otter aerial surveys by merging master si
 # Remove rows marked as "DO NOT USE"
 # If same SUBSITE appears multiple times (excluding DO NOT USE):
 #   - These are multiple passes of the same site (not errors)
-#   - Use data from the entry with the EARLIEST TIME for most fields
-#   - Concatenate ADD values across all entries (e.g., "Add 1; Add 2")
-#   - Concatenate DISTURBANCE values, removing repeated "Disturbed" prefix
-#     (e.g., "Disturbed 40-50; 25; 9; 5" instead of "Disturbed 40-50; Disturbed 25; Disturbed 9; Disturbed 5")
-#   - Concatenate PASS DESCRIPTION values separated by "; "
 #   - Do NOT flag duplicates as NEEDS_REVIEW
+#   - Combine MML_IDs if they differ (e.g., "183A" + "183B" -> "183A-B")
+#   - Always concatenate DISTURBANCE (with "+" separator, remove repeated "Disturbed" prefix)
+#   - Always concatenate PASS DESCRIPTION (with "; " separator)
+#   - ADD values are integers, concatenated with "+"
+#
+# Three scenarios for multiple passes:
+#
+# 1. MIXED PHOTO + COUNT passes (e.g., RUGGED: photo pass + count pass):
+#    - Use the PHOTO pass row as the base (PASS not null)
+#    - Move COUNT values from count passes into ADD as "COUNT x"
+#    - Template shows PHOTO=Y, COUNTTYPE=3, ADD includes "COUNT 0" etc.
+#
+# 2. MULTIPLE COUNT passes only (e.g., UGAK: two count passes):
+#    - Use earliest TIME row as base
+#    - Concatenate COUNT values with "+" in LOG_COUNT (e.g., "0+0")
+#
+# 3. MULTIPLE PHOTO passes only (e.g., AMAK+ROCKS):
+#    - Use earliest TIME row as base
+#    - Standard aggregation of ADD/DISTURBANCE/PASS DESCRIPTION
 ```
 
 #### **Step 3B: Determine Survey Status**
