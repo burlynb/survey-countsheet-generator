@@ -1,4 +1,4 @@
-# Sea Otter Survey Count Sheet Generator
+# Steller sea lion Survey Count Sheet Generator
 
 Automated generation of count sheet templates from aerial survey field logs using Claude Code AI skills.
 
